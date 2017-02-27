@@ -570,4 +570,26 @@ bad:
 
 ## Ex6
 
-实现上
+### Ex6.1
+
+每个表项占8个字节，表项详细定义如下：
+
+```c
+struct gatedesc {
+    unsigned gd_off_15_0 : 16;        // low 16 bits of offset in segment
+    unsigned gd_ss : 16;            // segment selector
+    unsigned gd_args : 5;            // # args, 0 for interrupt/trap gates
+    unsigned gd_rsv1 : 3;            // reserved(should be zero I guess)
+    unsigned gd_type : 4;            // type(STS_{TG,IG32,TG32})
+    unsigned gd_s : 1;                // must be 0 (system)
+    unsigned gd_dpl : 2;            // descriptor(meaning new) privilege level
+    unsigned gd_p : 1;                // Present
+    unsigned gd_off_31_16 : 16;        // high bits of offset in segment
+};
+```
+
+低0...15位和48...63位为偏移，16...31位为段选择符。
+
+### Ex6.2 & Ex6.3
+
+见代码

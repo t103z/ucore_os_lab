@@ -171,4 +171,3 @@ struct taskstate {
 };
 
 #endif /* !__KERN_MM_MMU_H__ */
-

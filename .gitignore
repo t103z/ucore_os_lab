@@ -1,6 +1,12 @@
 *~
 obj/
 bin/
+labcodes_answer/
+.idea/
+CMakeLists.txt
+cmake-build-debug/
+labcodes/lab1/i386-elf-gcc.rb
+labcodes/lab1/test.*
 .gdb.in
 .qemu.out
 cscope.*
