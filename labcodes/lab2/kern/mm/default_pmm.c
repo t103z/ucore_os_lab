@@ -100,7 +100,7 @@ default_alloc_pages(size_t n) {
     if (page != NULL) {                             // if we have a free block found
         if (page->property > n) {                   // if we still have free space remained
             struct Page *p = page + n;              // head page of remaining free space
-            ClearPageProperty(p);
+            SetPageProperty(p);
             p->property = page->property - n;       // set free space of new free block
             list_add(&(page->page_link), &(p->page_link));       // add it after 'page'
         }
@@ -121,23 +121,25 @@ static void
 default_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
     struct Page *p = base;
+    // set every page in the freed block unreserved
     for (; p != base + n; p ++) {
-        assert(!PageReserved(p) && !PageProperty(p));
+        assert(PageReserved(p));                    // these pages should now be reserved
         p->flags = 0;
         set_page_ref(p, 0);
     }
-    base->property = n;
+    base->property = n;                             // set block heading page
     SetPageProperty(base);
+    // now we try to merge free blocks
     list_entry_t *le = list_next(&free_list);
     while (le != &free_list) {
         p = le2page(le, page_link);
         le = list_next(le);
-        if (base + base->property == p) {
+        if (base + base->property == p) {           // next free block is next to current block
             base->property += p->property;
             ClearPageProperty(p);
             list_del(&(p->page_link));
         }
-        else if (p + p->property == base) {
+        else if (p + p->property == base) {         // previous free block is next to current block
             p->property += base->property;
             ClearPageProperty(base);
             base = p;
@@ -145,7 +147,10 @@ default_free_pages(struct Page *base, size_t n) {
         }
     }
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    // add free block to list
+    le = list_next(&free_list);
+    while (le2page(le, page_link) < base) le = list_next(le);
+    list_add_before(&le, &(base->page_link));
 }
 
 static size_t
