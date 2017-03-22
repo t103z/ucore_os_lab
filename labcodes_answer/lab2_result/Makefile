@@ -4,7 +4,8 @@ SPACE	:= $(EMPTY) $(EMPTY)
 SLASH	:= /
 
 V       := @
-
+#need llvm/cang-3.5+
+#USELLVM := 1
 # try to infer the correct GCCPREFX
 ifndef GCCPREFIX
 GCCPREFIX := $(shell if i386-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/dev/null 2>&1; \
@@ -12,10 +13,10 @@ GCCPREFIX := $(shell if i386-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/dev/nu
 	elif objdump -i 2>&1 | grep 'elf32-i386' >/dev/null 2>&1; \
 	then echo ''; \
 	else echo "***" 1>&2; \
-	echo "*** Error: Couldn't find an i386-ucore-elf version of GCC/binutils." 1>&2; \
-	echo "*** Is the directory with i386-ucore-elf-gcc in your PATH?" 1>&2; \
-	echo "*** If your i386-ucore-elf toolchain is installed with a command" 1>&2; \
-	echo "*** prefix other than 'i386-ucore-elf-', set your GCCPREFIX" 1>&2; \
+	echo "*** Error: Couldn't find an i386-elf version of GCC/binutils." 1>&2; \
+	echo "*** Is the directory with i386-elf-gcc in your PATH?" 1>&2; \
+	echo "*** If your i386-elf toolchain is installed with a command" 1>&2; \
+	echo "*** prefix other than 'i386-elf-', set your GCCPREFIX" 1>&2; \
 	echo "*** environment variable to that prefix and run 'make' again." 1>&2; \
 	echo "*** To turn off this error, run 'gmake GCCPREFIX= ...'." 1>&2; \
 	echo "***" 1>&2; exit 1; fi)
@@ -27,6 +28,8 @@ QEMU := $(shell if which qemu-system-i386 > /dev/null; \
 	then echo 'qemu-system-i386'; exit; \
 	elif which i386-elf-qemu > /dev/null; \
 	then echo 'i386-elf-qemu'; exit; \
+	elif which qemu > /dev/null; \
+	then echo 'qemu'; exit; \
 	else \
 	echo "***" 1>&2; \
 	echo "*** Error: Couldn't find a working QEMU executable." 1>&2; \
@@ -41,15 +44,21 @@ endif
 .DELETE_ON_ERROR:
 
 # define compiler and flags
-
+ifndef  USELLVM
 HOSTCC		:= gcc
 HOSTCFLAGS	:= -g -Wall -O2
-
-GDB		:= $(GCCPREFIX)gdb
-
 CC		:= $(GCCPREFIX)gcc
 CFLAGS	:= -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc $(DEFS)
 CFLAGS	+= $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
+else
+HOSTCC		:= clang
+HOSTCFLAGS	:= -g -Wall -O2
+CC		:= clang
+CFLAGS	:= -fno-builtin -Wall -g -m32 -mno-sse -nostdinc $(DEFS)
+CFLAGS	+= $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
+endif
+
+GDB		:= $(GCCPREFIX)gdb
 CTYPE	:= c S
 
 LD      := $(GCCPREFIX)ld
@@ -148,6 +157,12 @@ $(kernel): $(KOBJS)
 
 $(call create_target,kernel)
 
+
+# create kernel_nopage target
+
+
+$(call create_target,kernel)
+
 # -------------------------------------------------------------------
 
 # create bootblock
@@ -176,7 +191,7 @@ $(call create_target_host,sign,sign)
 # create ucore.img
 UCOREIMG	:= $(call totarget,ucore.img)
 
-$(UCOREIMG): $(kernel) $(bootblock)
+$(UCOREIMG): $(kernel) $(bootblock) $(kernel_nopage)
 	$(V)dd if=/dev/zero of=$@ count=10000
 	$(V)dd if=$(bootblock) of=$@ conv=notrunc
 	$(V)dd if=$(kernel) of=$@ seek=1 conv=notrunc
@@ -201,27 +216,28 @@ endif
 
 # files for grade script
 
-targets: $(TARGETS)
+TARGETS: $(TARGETS)
 
-.DEFAULT_GOAL := targets
+.DEFAULT_GOAL := TARGETS
 
 QEMUOPTS = -hda $(UCOREIMG)
+all: qemu
 
 .PHONY: qemu qemu-nox debug debug-nox
 qemu-mon: $(UCOREIMG)
-	$(V)$(QEMU) -monitor stdio $(QEMUOPTS) -serial null
+	$(V)$(QEMU)  -no-reboot -monitor stdio $(QEMUOPTS) -serial null
 qemu: $(UCOREIMG)
-	$(V)$(QEMU) -parallel stdio $(QEMUOPTS) -serial null
+	$(V)$(QEMU)  -no-reboot -parallel stdio $(QEMUOPTS) -serial null
 
 qemu-nox: targets
-	$(V)$(QEMU) -serial mon:stdio $(QEMUOPTS) -nographic
+	$(V)$(QEMU)  -no-reboot -serial mon:stdio $(QEMUOPTS) -nographic
 
 TERMINAL := gnome-terminal
 
 debug: $(UCOREIMG)
-	$(V)$(QEMU) -S -s -parallel stdio $(QEMUOPTS) -serial null &
+	$(V)$(QEMU) -S -s -d in_asm -D $(BINDIR)/q.log -parallel stdio -hda $< -serial null &
 	$(V)sleep 2
-	$(V)$(TERMINAL) -e "$(GDB) -q -x tools/gdbinit"
+	./debug.scpt
 
 debug-nox: $(UCOREIMG)
 	$(V)$(QEMU) -S -s -serial mon:stdio $(QEMUOPTS) -nographic &
@@ -248,9 +264,9 @@ touch:
 print-%:
 	@echo $($(shell echo $(patsubst print-%,%,$@) | $(TR) [a-z] [A-Z]))
 
-.PHONY: clean distclean handin
+.PHONY: clean distclean handin tags
 clean:
-	$(V)$(RM) $(GRADE_GDB_IN) $(GRADE_QEMU_OUT)
+	$(V)$(RM) $(GRADE_GDB_IN) $(GRADE_QEMU_OUT) cscope* tags
 	$(V)$(RM) -r $(OBJDIR) $(BINDIR)
 
 distclean: clean
@@ -261,3 +277,9 @@ handin: distclean
 					| grep -v '/\.git/' | grep -v '/\.svn/' | grep -v "$(HANDIN)"` \
 					| $(ZIP) > $(HANDIN)
 
+tags:
+	@echo TAGS ALL
+	$(V)rm -f cscope.files cscope.in.out cscope.out cscope.po.out tags
+	$(V)find . -type f -name "*.[chS]" >cscope.files
+	$(V)cscope -bq
+	$(V)ctags -L cscope.files

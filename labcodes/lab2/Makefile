@@ -244,7 +244,7 @@ TERMINAL := gnome-terminal
 debug: $(UCOREIMG)
 	$(V)$(QEMU) -S -s -parallel stdio $(QEMUOPTS) -serial null &
 	$(V)sleep 2
-	$(V)$(TERMINAL) -e "$(GDB) -q -x tools/gdbinit"
+	./debug.scpt
 
 debug-nox: $(UCOREIMG)
 	$(V)$(QEMU) -S -s -serial mon:stdio $(QEMUOPTS) -nographic &
@@ -283,10 +283,10 @@ handin: distclean
 	$(V)$(TAR) -cf - `find . -type f -o -type d | grep -v '^\.$$' | grep -v '/CVS/' \
 					| grep -v '/\.git/' | grep -v '/\.svn/' | grep -v "$(HANDIN)"` \
 					| $(ZIP) > $(HANDIN)
-					
+
 tags:
 	@echo TAGS ALL
 	$(V)rm -f cscope.files cscope.in.out cscope.out cscope.po.out tags
 	$(V)find . -type f -name "*.[chS]" >cscope.files
-	$(V)cscope -bq 
+	$(V)cscope -bq
 	$(V)ctags -L cscope.files
