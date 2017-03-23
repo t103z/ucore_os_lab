@@ -60,6 +60,16 @@ free_area_t free_area;
 #define nr_free (free_area.nr_free)
 
 static void
+print_free_list(void) {
+    list_entry_t *le = &free_list;
+    cprintf("Printing list\n");
+    while((le = list_next(le)) != &free_list) {
+        struct Page *pp = le2page(le, page_link);
+        cprintf("block in list: addr %x size %d\n", pp, pp->property);
+    }
+}
+
+static void
 default_init(void) {
     list_init(&free_list);
     nr_free = 0;
@@ -148,9 +158,12 @@ default_free_pages(struct Page *base, size_t n) {
     }
     nr_free += n;
     // add free block to list
-    le = list_next(&free_list);
-    while (le2page(le, page_link) < base) le = list_next(le);
-    list_add_before(&le, &(base->page_link));
+    le = &free_list;
+    while ((le = list_next(le)) != &free_list) {
+        p = le2page(le, page_link);
+        if (p > base) break;
+    }
+    list_add_before(le, &(base->page_link));
 }
 
 static size_t
