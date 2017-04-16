@@ -23,20 +23,20 @@ manage all these details efficiently. In ucore, a thread is just a special kind 
 process state       :     meaning               -- reason
     PROC_UNINIT     :   uninitialized           -- alloc_proc
     PROC_SLEEPING   :   sleeping                -- try_free_pages, do_wait, do_sleep
-    PROC_RUNNABLE   :   runnable(maybe running) -- proc_init, wakeup_proc, 
+    PROC_RUNNABLE   :   runnable(maybe running) -- proc_init, wakeup_proc,
     PROC_ZOMBIE     :   almost dead             -- do_exit
 
 -----------------------------
 process state changing:
-                                            
+
   alloc_proc                                 RUNNING
       +                                   +--<----<--+
       +                                   + proc_run +
-      V                                   +-->---->--+ 
+      V                                   +-->---->--+
 PROC_UNINIT -- proc_init/wakeup_proc --> PROC_RUNNABLE -- try_free_pages/do_wait/do_sleep --> PROC_SLEEPING --
                                            A      +                                                           +
                                            |      +--- do_exit --> PROC_ZOMBIE                                +
-                                           +                                                                  + 
+                                           +                                                                  +
                                            -----------------------wakeup_proc----------------------------------
 -----------------------------
 process relations
@@ -52,9 +52,9 @@ SYS_wait        : wait process                            -->do_wait
 SYS_exec        : after fork, process execute a program   -->load a program and refresh the mm
 SYS_clone       : create child thread                     -->do_fork-->wakeup_proc
 SYS_yield       : process flag itself need resecheduling, -- proc->need_sched=1, then scheduler will rescheule this process
-SYS_sleep       : process sleep                           -->do_sleep 
+SYS_sleep       : process sleep                           -->do_sleep
 SYS_kill        : kill process                            -->do_kill-->proc->flags |= PF_EXITING
-                                                                 -->wakeup_proc-->do_wait-->do_exit   
+                                                                 -->wakeup_proc-->do_wait-->do_exit
 SYS_getpid      : get the process's pid
 
 */
@@ -203,14 +203,18 @@ get_pid(void) {
 // NOTE: before call switch_to, should load  base addr of "proc"'s new PDT
 void
 proc_run(struct proc_struct *proc) {
+    cprintf("Schedule: proc_run\n");
     if (proc != current) {
         bool intr_flag;
         struct proc_struct *prev = current, *next = proc;
         local_intr_save(intr_flag);
         {
             current = proc;
+            cprintf("Loading esp, address: %x\n", next->kstack + KSTACKSIZE);
             load_esp0(next->kstack + KSTACKSIZE);
+            cprintf("Loading PDT, CR3 address: %x\n", next->cr3);
             lcr3(next->cr3);
+            cprintf("Switching, pid: %d --> pid: %d...\n", prev->pid, next->pid);
             switch_to(&(prev->context), &(next->context));
         }
         local_intr_restore(intr_flag);
@@ -253,7 +257,7 @@ find_proc(int pid) {
 }
 
 // kernel_thread - create a kernel thread using "fn" function
-// NOTE: the contents of temp trapframe tf will be copied to 
+// NOTE: the contents of temp trapframe tf will be copied to
 //       proc->tf in do_fork-->copy_thread function
 int
 kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags) {
@@ -372,6 +376,8 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf) {
  */
 int
 do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
+    cprintf("----BEGIN:FORK-------------------------------------------------\n");
+    cprintf("Syscall sys_fork\n");
     int ret = -E_NO_FREE_PROC;
     struct proc_struct *proc;
     if (nr_process >= MAX_PROCESS) {
@@ -403,19 +409,26 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     //    5. insert proc_struct into hash_list && proc_list
     //    6. call wakeup_proc to make the new child process RUNNABLE
     //    7. set ret vaule using child proc's pid
+    cprintf("Alloc kernel process, state set to UNINIT\n");
     if ((proc = alloc_proc()) == NULL) {
         goto fork_out;
     }
 
+    cprintf("Set up parent process\n");
     proc->parent = current;
     assert(current->wait_state == 0);
 
+    cprintf("Set up kernel stack\n");
     if (setup_kstack(proc) != 0) {
         goto bad_fork_cleanup_proc;
     }
+
+    cprintf("Copy mm\n");
     if (copy_mm(clone_flags, proc) != 0) {
         goto bad_fork_cleanup_kstack;
     }
+
+    cprintf("Copy thread\n");
     copy_thread(proc, stack, tf);
 
     bool intr_flag;
@@ -428,9 +441,11 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     }
     local_intr_restore(intr_flag);
 
+    cprintf("Call wakeup_proc\n");
     wakeup_proc(proc);
 
     ret = proc->pid;
+    cprintf("----END:FORK------------------------------------------------\n");
 fork_out:
     return ret;
 
@@ -447,13 +462,15 @@ bad_fork_cleanup_proc:
 //   3. call scheduler to switch to other process
 int
 do_exit(int error_code) {
+    cprintf("----BEGIN:EXIT------------------------------------------------\n");
+    cprintf("Syscall do_exit\n");
     if (current == idleproc) {
         panic("idleproc exit.\n");
     }
     if (current == initproc) {
         panic("initproc exit.\n");
     }
-    
+
     struct mm_struct *mm = current->mm;
     if (mm != NULL) {
         lcr3(boot_cr3);
@@ -464,21 +481,24 @@ do_exit(int error_code) {
         }
         current->mm = NULL;
     }
+    cprintf("Set state to ZOMBIE\n");
     current->state = PROC_ZOMBIE;
+    cprintf("Set exit code: %d\n", error_code);
     current->exit_code = error_code;
-    
+
     bool intr_flag;
     struct proc_struct *proc;
     local_intr_save(intr_flag);
     {
         proc = current->parent;
+        cprintf("Wakeup parent, pid: %d\n", proc->pid);
         if (proc->wait_state == WT_CHILD) {
             wakeup_proc(proc);
         }
         while (current->cptr != NULL) {
             proc = current->cptr;
             current->cptr = proc->optr;
-    
+
             proc->yptr = NULL;
             if ((proc->optr = initproc->cptr) != NULL) {
                 initproc->cptr->yptr = proc;
@@ -493,7 +513,8 @@ do_exit(int error_code) {
         }
     }
     local_intr_restore(intr_flag);
-    
+    cprintf("----END:EXIT-----------------------------------------------\n");
+
     schedule();
     panic("do_exit will not return!! %d.\n", current->pid);
 }
@@ -511,6 +532,7 @@ load_icode(unsigned char *binary, size_t size) {
     int ret = -E_NO_MEM;
     struct mm_struct *mm;
     //(1) create a new mm for current process
+    cprintf("Creating mm\n");
     if ((mm = mm_create()) == NULL) {
         goto bad_mm;
     }
@@ -518,6 +540,7 @@ load_icode(unsigned char *binary, size_t size) {
     if (setup_pgdir(mm) != 0) {
         goto bad_pgdir_cleanup_mm;
     }
+    cprintf("Setting up PDT, address: %x\n", mm->pgdir);
     //(3) copy TEXT/DATA section, build BSS parts in binary to memory space of process
     struct Page *page;
     //(3.1) get the file header of the bianry program (ELF format)
@@ -610,14 +633,17 @@ load_icode(unsigned char *binary, size_t size) {
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-2*PGSIZE , PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-3*PGSIZE , PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
-    
+
     //(5) set current process's mm, sr3, and set CR3 reg = physical addr of Page Directory
     mm_count_inc(mm);
     current->mm = mm;
     current->cr3 = PADDR(mm->pgdir);
+    cprintf("Load CR3\n");
     lcr3(PADDR(mm->pgdir));
 
     //(6) setup trapframe for user environment
+    cprintf("Setting up trapframe for user environment\n");
+    cprintf("CS: %x, DS: %x, ESP: %x, EIP: %x, EFLAGS: %x\n", USER_CS, USER_DS, USTACKTOP, elf->e_entry, FL_IF);
     struct trapframe *tf = current->tf;
     memset(tf, 0, sizeof(struct trapframe));
     /* LAB5:EXERCISE1 YOUR CODE
@@ -651,6 +677,8 @@ bad_mm:
 //           - call load_icode to setup new memory space accroding binary prog.
 int
 do_execve(const char *name, size_t len, unsigned char *binary, size_t size) {
+    cprintf("----BEGIN:EXECVE---------------------------------------------\n");
+    cprintf("Launching user process, syscall: do_execve, name: %s\n", name);
     struct mm_struct *mm = current->mm;
     if (!user_mem_check(mm, (uintptr_t)name, len, 0)) {
         return -E_INVAL;
@@ -662,8 +690,10 @@ do_execve(const char *name, size_t len, unsigned char *binary, size_t size) {
     char local_name[PROC_NAME_LEN + 1];
     memset(local_name, 0, sizeof(local_name));
     memcpy(local_name, name, len);
+    cprintf("Setting local name: %s\n", local_name);
 
     if (mm != NULL) {
+        cprintf("Loading kernel PDT, CR3 address: %x\n", boot_cr3);
         lcr3(boot_cr3);
         if (mm_count_dec(mm) == 0) {
             exit_mmap(mm);
@@ -673,10 +703,12 @@ do_execve(const char *name, size_t len, unsigned char *binary, size_t size) {
         current->mm = NULL;
     }
     int ret;
+    cprintf("Loading user program code, address: %x, size: %d\n", binary, size);
     if ((ret = load_icode(binary, size)) != 0) {
         goto execve_exit;
     }
     set_proc_name(current, local_name);
+    cprintf("----END:EXECVE------------------------------------------\n");
     return 0;
 
 execve_exit:
@@ -687,6 +719,7 @@ execve_exit:
 // do_yield - ask the scheduler to reschedule
 int
 do_yield(void) {
+    cprintf("Syscal: sys_yield\n");
     current->need_resched = 1;
     return 0;
 }
@@ -696,6 +729,7 @@ do_yield(void) {
 // NOTE: only after do_wait function, all resources of the child proces are free.
 int
 do_wait(int pid, int *code_store) {
+    cprintf("Syscall: sys_wait\n");
     struct mm_struct *mm = current->mm;
     if (code_store != NULL) {
         if (!user_mem_check(mm, (uintptr_t)code_store, sizeof(int), 1)) {
@@ -709,6 +743,7 @@ repeat:
     haskid = 0;
     if (pid != 0) {
         proc = find_proc(pid);
+        cprintf("sys_wait: waiting fro child, pid: %d\n", proc->pid);
         if (proc != NULL && proc->parent == current) {
             haskid = 1;
             if (proc->state == PROC_ZOMBIE) {
@@ -718,6 +753,7 @@ repeat:
     }
     else {
         proc = current->cptr;
+        cprintf("sys_wait: wait to free any zombie\n");
         for (; proc != NULL; proc = proc->optr) {
             haskid = 1;
             if (proc->state == PROC_ZOMBIE) {
@@ -726,6 +762,7 @@ repeat:
         }
     }
     if (haskid) {
+        cprintf("sys_wait: set pid %d state to SLEEPING\n", current->pid);
         current->state = PROC_SLEEPING;
         current->wait_state = WT_CHILD;
         schedule();
@@ -737,6 +774,7 @@ repeat:
     return -E_BAD_PROC;
 
 found:
+    cprintf("sys_wait: found zombie, pid %d\n", proc->pid);
     if (proc == idleproc || proc == initproc) {
         panic("wait idleproc or initproc.\n");
     }
@@ -825,6 +863,11 @@ init_main(void *arg) {
         panic("create user_main failed.\n");
     }
 
+    pid = kernel_thread(user_main, NULL, 0);
+    if (pid <= 0) {
+        panic("create user_main failed.\n");
+    }
+
     while (do_wait(0, NULL) == 0) {
         schedule();
     }
@@ -840,7 +883,7 @@ init_main(void *arg) {
     return 0;
 }
 
-// proc_init - set up the first kernel thread idleproc "idle" by itself and 
+// proc_init - set up the first kernel thread idleproc "idle" by itself and
 //           - create the second kernel thread init_main
 void
 proc_init(void) {
@@ -885,4 +928,3 @@ cpu_idle(void) {
         }
     }
 }
-

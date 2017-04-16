@@ -8,4 +8,3 @@ main(void) {
     cprintf("hello pass.\n");
     return 0;
 }
-

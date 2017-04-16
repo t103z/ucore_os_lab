@@ -98,4 +98,3 @@ syscall(void) {
     panic("undefined syscall %d, pid = %d, name = %s.\n",
             num, current->pid, current->name);
 }
-

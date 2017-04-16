@@ -11,6 +11,7 @@ wakeup_proc(struct proc_struct *proc) {
     local_intr_save(intr_flag);
     {
         if (proc->state != PROC_RUNNABLE) {
+            cprintf("wakeup_proc: state set to RUNNABLE\n");
             proc->state = PROC_RUNNABLE;
             proc->wait_state = 0;
         }
@@ -31,6 +32,7 @@ schedule(void) {
         current->need_resched = 0;
         last = (current == idleproc) ? &proc_list : &(current->list_link);
         le = last;
+        cprintf("Schedule: checking for next PROC_RUNNABLE\n");
         do {
             if ((le = list_next(le)) != &proc_list) {
                 next = le2proc(le, list_link);
@@ -49,4 +51,3 @@ schedule(void) {
     }
     local_intr_restore(intr_flag);
 }
-

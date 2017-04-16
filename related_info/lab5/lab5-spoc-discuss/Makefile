@@ -7,8 +7,8 @@ V       := @
 
 # try to infer the correct GCCPREFX
 ifndef GCCPREFIX
-GCCPREFIX := $(shell if i386-ucore-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/dev/null 2>&1; \
-	then echo 'i386-ucore-elf-'; \
+GCCPREFIX := $(shell if i386-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/dev/null 2>&1; \
+	then echo 'i386-elf-'; \
 	elif objdump -i 2>&1 | grep 'elf32-i386' >/dev/null 2>&1; \
 	then echo ''; \
 	else echo "***" 1>&2; \
@@ -47,7 +47,7 @@ HOSTCFLAGS	:= -g -Wall -O2
 
 GDB		:= $(GCCPREFIX)gdb
 
-CC		?= $(GCCPREFIX)gcc
+CC		:= $(GCCPREFIX)gcc
 CFLAGS	:= -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc $(DEFS)
 CFLAGS	+= $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 CTYPE	:= c S
@@ -75,6 +75,14 @@ BINDIR	:= bin
 ALLOBJS	:=
 ALLDEPS	:=
 TARGETS	:=
+
+UNAME 		:= $(shell uname)
+
+ifeq ($(UNAME), Darwin)
+	BS=1m
+else
+	BS=1M
+endif
 
 include tools/function.mk
 
@@ -229,7 +237,7 @@ $(call create_target,ucore.img)
 SWAPIMG		:= $(call totarget,swap.img)
 
 $(SWAPIMG):
-	$(V)dd if=/dev/zero of=$@ bs=1M count=128
+	$(V)dd if=/dev/zero of=$@ bs=$(BS) count=128
 
 $(call create_target,swap.img)
 
@@ -325,4 +333,3 @@ handin: packall
 packall: clean
 	@$(RM) -f $(HANDIN)
 	@tar -czf $(HANDIN) `find . -type f -o -type d | grep -v '^\.*$$' | grep -vF '$(HANDIN)'`
-
