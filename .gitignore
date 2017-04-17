@@ -2,6 +2,7 @@
 obj/
 bin/
 labcodes_answer/
+*-handin/
 .idea/
 CMakeLists.txt
 cmake-build-debug/
