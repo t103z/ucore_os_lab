@@ -56,17 +56,20 @@ idt_init(void) {
     int i;
     extern uintptr_t __vectors[];        // __vectors is defined in kern/trap/vectors.S
 
+    /* LAB5 2014011561 */
+    //you should update your lab1 code (just add ONE or TWO lines of code), let user app to use syscall to get the service of ucore
+    //so you should setup the syscall interrupt gate in here
+
     // set IDT
     for (i = 0; i < 256; i++) {
         SETGATE(idt[i], 0, GD_KTEXT, __vectors[i], DPL_KERNEL);
     }
+    // set syscall gate
+    SETGATE(idt[T_SYSCALL], 0, GD_KTEXT, __vectors[T_SYSCALL], DPL_USER);
     // set switch to kernel
     SETGATE(idt[T_SWITCH_TOK], 0, GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
     // load idt
     lidt(&idt_pd);
-     /* LAB5 YOUR CODE */ 
-     //you should update your lab1 code (just add ONE or TWO lines of code), let user app to use syscall to get the service of ucore
-     //so you should setup the syscall interrupt gate in here
 }
 
 static const char *
@@ -213,7 +216,7 @@ trap_dispatch(struct trapframe *tf) {
                     panic("handle pgfault failed in kernel mode. ret=%d\n", ret);
                 }
                 cprintf("killed by kernel.\n");
-                panic("handle user mode pgfault failed. ret=%d\n", ret); 
+                panic("handle user mode pgfault failed. ret=%d\n", ret);
                 do_exit(-E_KILLED);
             }
         }
@@ -231,15 +234,20 @@ trap_dispatch(struct trapframe *tf) {
         /* (1) After a timer interrupt, you should record this event using a global variable (increase it), such as ticks in kern/driver/clock.c
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
-         */ticks++;
-        if (ticks % TICK_NUM == 0) {
-            print_ticks();
-        }
-        /* LAB5 YOUR CODE */
+         */
+
+        ticks++;
+        /* LAB5 2014011561 */
         /* you should upate you lab1 code (just add ONE or TWO lines of code):
          *    Every TICK_NUM cycle, you should set current process's current->need_resched = 1
          */
-  
+        if (ticks % TICK_NUM == 0) {
+            // print_ticks();
+            assert(current != NULL);
+            current->need_resched = 1;
+        }
+
+
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -308,11 +316,11 @@ trap(struct trapframe *tf) {
         // keep a trapframe chain in stack
         struct trapframe *otf = current->tf;
         current->tf = tf;
-    
+
         bool in_kernel = trap_in_kernel(tf);
-    
+
         trap_dispatch(tf);
-    
+
         current->tf = otf;
         if (!in_kernel) {
             if (current->flags & PF_EXITING) {
@@ -324,4 +332,3 @@ trap(struct trapframe *tf) {
         }
     }
 }
-
