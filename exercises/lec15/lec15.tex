@@ -1,0 +1,46 @@
+\documentclass[a4paper]{article}
+\usepackage{xeCJK}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{bbm}
+\usepackage{parskip}
+\usepackage{listings}
+\setlength{\parindent}{0cm}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{array}
+\usepackage{multirow}
+\newcommand*\diff{\mathop{}\!\mathrm{d}}
+ \newcommand{\sgn}{\operatorname{sgn}}
+\renewcommand{\arraystretch}{1.2}
+\newcolumntype{C}[1]{>{\centering\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+
+\title{Lec 15 Exercise}
+\author{
+        计44 张欣阳 2014011561
+}
+\date{2017-04-19}
+
+\begin{document}
+
+\maketitle
+
+\section*{题目1}
+证明短进程优先算法具有最小平均周转时间
+
+\begin{proof}[\textbf{证明}]
+    对于调度序列$r_1, r_2, ..., r_n$，我们称$(r_i, r_j)$为一个逆序对，如果$i < j$且进程运行时间$r_i \beq r_j$，我们先证明调换$(r_i, r_j)$平均周转时间将会变短。
+
+    调换后，平均周转时间的变化是：
+    \begin{align*}
+        \Delta t &= \frac{1}{n}[(n-i+1)*r_j + (n-j+1)*r_i - (n-i+1)*r_i - (n-j+1)*r_j]\\
+        &= \frac{j-i}{n}(r_j-r_i)
+    \end{align*}
+    因为$i<j$，且$r_i \beq r_j$，所以$\Delta t \leq 0$，即平均周转时间变短了。所以对于一个序列，如果有逆序对存在，总可以通过交换逆序对的方式使平均周转时间变短。那么对于短进程优先算法，由于其调度序列没有逆序对，所以有最小平均周转时间。
+
+\end{proof}
+
+
+\end{document}
