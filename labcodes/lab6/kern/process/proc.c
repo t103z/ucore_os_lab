@@ -103,9 +103,9 @@ alloc_proc(void) {
      *       uint32_t flags;                             // Process flag
      *       char name[PROC_NAME_LEN + 1];               // Process name
      */
-     //LAB5 YOUR CODE : (update LAB4 steps)
+     //LAB5 2014011561 : (update LAB4 steps)
     /*
-     * below fields(add in LAB5) in proc_struct need to be initialized	
+     * below fields(add in LAB5) in proc_struct need to be initialized
      *       uint32_t wait_state;                        // waiting state
      *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
 	  */
@@ -123,7 +123,7 @@ alloc_proc(void) {
         memset(proc->name, 0, PROC_NAME_LEN);
         proc->wait_state = 0;
         proc->cptr = proc->optr = proc->yptr = NULL;
-     //LAB6 YOUR CODE : (update LAB5 steps)
+     //LAB6 2014011561 : (update LAB5 steps)
     /*
      * below fields(add in LAB6) in proc_struct need to be initialized
      *     struct run_queue *rq;                       // running queue contains Process
@@ -133,6 +133,13 @@ alloc_proc(void) {
      *     uint32_t lab6_stride;                       // FOR LAB6 ONLY: the current stride of the process
      *     uint32_t lab6_priority;                     // FOR LAB6 ONLY: the priority of process, set by lab6_set_priority(uint32_t)
      */
+        proc->rq = NULL;    // set running queue to NULL
+        list_init(&(proc->run_link));   // init run_link list
+        proc->time_slice = 0;
+        // for skew heap data structure, set parent, left, right pointer to NULL
+        proc->lab6_run_pool.left = proc->lab6_run_pool.right = proc->lab6_run_pool.parent = NULL;
+        proc->lab6_stride = 0;
+        proc->lab6_priority = 0;
     }
     return proc;
 }
@@ -911,7 +918,7 @@ cpu_idle(void) {
     }
 }
 
-//FOR LAB6, set the process's priority (bigger value will get more CPU time) 
+//FOR LAB6, set the process's priority (bigger value will get more CPU time)
 void
 lab6_set_priority(uint32_t priority)
 {
