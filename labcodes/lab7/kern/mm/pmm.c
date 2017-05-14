@@ -144,18 +144,18 @@ init_pmm_manager(void) {
     pmm_manager->init();
 }
 
-//init_memmap - call pmm->init_memmap to build Page struct for free memory  
+//init_memmap - call pmm->init_memmap to build Page struct for free memory
 static void
 init_memmap(struct Page *base, size_t n) {
     pmm_manager->init_memmap(base, n);
 }
 
-//alloc_pages - call pmm->alloc_pages to allocate a continuous n*PAGESIZE memory 
+//alloc_pages - call pmm->alloc_pages to allocate a continuous n*PAGESIZE memory
 struct Page *
 alloc_pages(size_t n) {
     struct Page *page=NULL;
     bool intr_flag;
-    
+
     while (1)
     {
          local_intr_save(intr_flag);
@@ -165,7 +165,7 @@ alloc_pages(size_t n) {
          local_intr_restore(intr_flag);
 
          if (page != NULL || n > 1 || swap_init_ok == 0) break;
-         
+
          extern struct mm_struct *check_mm_struct;
          //cprintf("page %x, call swap_out in alloc_pages %d\n",page, n);
          swap_out(check_mm_struct, n, 0);
@@ -174,7 +174,7 @@ alloc_pages(size_t n) {
     return page;
 }
 
-//free_pages - call pmm->free_pages to free a continuous n*PAGESIZE memory 
+//free_pages - call pmm->free_pages to free a continuous n*PAGESIZE memory
 void
 free_pages(struct Page *base, size_t n) {
     bool intr_flag;
@@ -185,7 +185,7 @@ free_pages(struct Page *base, size_t n) {
     local_intr_restore(intr_flag);
 }
 
-//nr_free_pages - call pmm->nr_free_pages to get the size (nr*PAGESIZE) 
+//nr_free_pages - call pmm->nr_free_pages to get the size (nr*PAGESIZE)
 //of current free memory
 size_t
 nr_free_pages(void) {
@@ -268,7 +268,7 @@ enable_paging(void) {
 //  la:   linear address of this memory need to map (after x86 segment map)
 //  size: memory size
 //  pa:   physical address of this memory
-//  perm: permission of this memory  
+//  perm: permission of this memory
 static void
 boot_map_segment(pde_t *pgdir, uintptr_t la, size_t size, uintptr_t pa, uint32_t perm) {
     assert(PGOFF(la) == PGOFF(pa));
@@ -282,7 +282,7 @@ boot_map_segment(pde_t *pgdir, uintptr_t la, size_t size, uintptr_t pa, uint32_t
     }
 }
 
-//boot_alloc_page - allocate one page using pmm->alloc_pages(1) 
+//boot_alloc_page - allocate one page using pmm->alloc_pages(1)
 // return value: the kernel virtual address of this allocated page
 //note: this function is used to get the memory for PDT(Page Directory Table)&PT(Page Table)
 static void *
@@ -294,14 +294,14 @@ boot_alloc_page(void) {
     return page2kva(p);
 }
 
-//pmm_init - setup a pmm to manage physical memory, build PDT&PT to setup paging mechanism 
+//pmm_init - setup a pmm to manage physical memory, build PDT&PT to setup paging mechanism
 //         - check the correctness of pmm & paging mechanism, print PDT&PT
 void
 pmm_init(void) {
-    //We need to alloc/free the physical memory (granularity is 4KB or other size). 
+    //We need to alloc/free the physical memory (granularity is 4KB or other size).
     //So a framework of physical memory manager (struct pmm_manager)is defined in pmm.h
     //First we should init a physical memory manager(pmm) based on the framework.
-    //Then pmm can alloc/free the physical memory. 
+    //Then pmm can alloc/free the physical memory.
     //Now the first_fit/best_fit/worst_fit/buddy_system pmm are available.
     init_pmm_manager();
 
@@ -330,8 +330,8 @@ pmm_init(void) {
     //But shouldn't use this map until enable_paging() & gdt_init() finished.
     boot_map_segment(boot_pgdir, KERNBASE, KMEMSIZE, 0, PTE_W);
 
-    //temporary map: 
-    //virtual_addr 3G~3G+4M = linear_addr 0~4M = linear_addr 3G~3G+4M = phy_addr 0~4M     
+    //temporary map:
+    //virtual_addr 3G~3G+4M = linear_addr 0~4M = linear_addr 3G~3G+4M = phy_addr 0~4M
     boot_pgdir[0] = boot_pgdir[PDX(KERNBASE)];
 
     enable_paging();
@@ -349,7 +349,7 @@ pmm_init(void) {
     check_boot_pgdir();
 
     print_pgdir();
-    
+
     kmalloc_init();
 
 }
@@ -363,7 +363,7 @@ pmm_init(void) {
 // return vaule: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
-    /* LAB2 EXERCISE 2: YOUR CODE
+    /* LAB2 EXERCISE 2: 2014011561
      *
      * If you need to visit a physical address, please use KADDR()
      * please read pmm.h for useful macros
@@ -384,18 +384,30 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
-#if 0
-    pde_t *pdep = NULL;   // (1) find page directory entry
-    if (0) {              // (2) check if entry is not present
-                          // (3) check if creating is needed, then alloc page for page table
-                          // CAUTION: this page is used for page table, not for common data page
-                          // (4) set page reference
-        uintptr_t pa = 0; // (5) get linear address of page
-                          // (6) clear page content using memset
-                          // (7) set page directory entry's permission
+    pde_t *pdep = &pgdir[PDX(la)];   // (1) find page directory entry, PDX(la) is la's index in PDT
+    if (!(*pdep & PTE_P)) {              // (2) check if entry is not present
+        // (3) check if creating is needed
+        if (!create) return NULL;
+        // then alloc page for page table
+        // CAUTION: this page is used for page table, not for common data page
+        struct Page *p = alloc_page();
+        if (p == NULL) return NULL;         // if allocation failed
+        // (4) set page reference
+        set_page_ref(p, 1);
+        // (5) get linear address of page
+        uintptr_t pa = page2pa(p);
+        // (6) clear page content using memset
+        memset(KADDR(pa), 0, PGSIZE);
+        // (7) set page directory entry's permission
+        *pdep = pa | PTE_P | PTE_W | PTE_U;
     }
-    return NULL;          // (8) return page table entry
-#endif
+    // (8) return page table entry
+    // pdep points to a PDE, so first of all we take higher bits of PDE as index
+    // of PT using macro PDE_ADDR, transform this address into kernel virtual address
+    // using KADDR, so now we have base address of PT
+    // then we use bits in linear address 'la' to index PT, and find the desired PTE
+    // finally we return its address
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -413,10 +425,10 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
 
 //page_remove_pte - free an Page sturct which is related linear address la
 //                - and clean(invalidate) pte which is related linear address la
-//note: PT is changed, so the TLB need to be invalidate 
+//note: PT is changed, so the TLB need to be invalidate
 static inline void
 page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
-    /* LAB2 EXERCISE 3: YOUR CODE
+    /* LAB2 EXERCISE 3: 2014011561
      *
      * Please check if ptep is valid, and tlb must be manually updated if mapping is updated
      *
@@ -432,15 +444,19 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
      * DEFINEs:
      *   PTE_P           0x001                   // page table/directory entry flags bit : Present
      */
-#if 0
-    if (0) {                      //(1) check if this page table entry is present
-        struct Page *page = NULL; //(2) find corresponding page to pte
-                                  //(3) decrease page reference
-                                  //(4) and free this page when page reference reachs 0
-                                  //(5) clear second page table entry
-                                  //(6) flush tlb
+    if (*ptep & PTE_P) {                      //(1) check if this page table entry is present
+        //(2) find corresponding page to pte
+        struct Page *page = pte2page(*ptep);
+        //(3) decrease page reference
+        //(4) and free this page when page reference reachs 0
+        if (page_ref_dec(page) == 0) {
+            free_page(page);
+        }
+        //(5) clear second page table entry
+        *ptep = 0;
+        //(6) flush tlb
+        tlb_invalidate(pgdir, la);
     }
-#endif
 }
 
 void
@@ -500,29 +516,37 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
             if ((nptep = get_pte(to, start, 1)) == NULL) {
                 return -E_NO_MEM;
             }
-        uint32_t perm = (*ptep & PTE_USER);
-        //get page from ptep
-        struct Page *page = pte2page(*ptep);
-        // alloc a page for process B
-        struct Page *npage=alloc_page();
-        assert(page!=NULL);
-        assert(npage!=NULL);
-        int ret=0;
-        /* LAB5:EXERCISE2 YOUR CODE
-         * replicate content of page to npage, build the map of phy addr of nage with the linear addr start
-         *
-         * Some Useful MACROs and DEFINEs, you can use them in below implementation.
-         * MACROs or Functions:
-         *    page2kva(struct Page *page): return the kernel vritual addr of memory which page managed (SEE pmm.h)
-         *    page_insert: build the map of phy addr of an Page with the linear addr la
-         *    memcpy: typical memory copy function
-         *
-         * (1) find src_kvaddr: the kernel virtual address of page
-         * (2) find dst_kvaddr: the kernel virtual address of npage
-         * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
-         * (4) build the map of phy addr of  nage with the linear addr start
-         */
-        assert(ret == 0);
+            uint32_t perm = (*ptep & PTE_USER);
+            //get page from ptep
+            struct Page *page = pte2page(*ptep);
+            // alloc a page for process B
+            struct Page *npage = alloc_page();
+            assert(page!=NULL);
+            assert(npage!=NULL);
+            int ret=0;
+            /* LAB5:EXERCISE2 2014011561
+             * replicate content of page to npage, build the map of phy addr of nage with the linear addr start
+             *
+             * Some Useful MACROs and DEFINEs, you can use them in below implementation.
+             * MACROs or Functions:
+             *    page2kva(struct Page *page): return the kernel vritual addr of memory which page managed (SEE pmm.h)
+             *    page_insert: build the map of phy addr of an Page with the linear addr la
+             *    memcpy: typical memory copy function
+             *
+             * (1) find src_kvaddr: the kernel virtual address of page
+             * (2) find dst_kvaddr: the kernel virtual address of npage
+             * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
+             * (4) build the map of phy addr of  nage with the linear addr start
+             */
+            // (1) find src_kvaddr: the kernel virtual address of page
+            void *src_kvaddr = page2kva(page);
+            // (2) find dst_kvaddr: the kernel virtual address of npage
+            void *dst_kvaddr = page2kva(npage);
+            // (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
+            memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+            // (4) build the map of phy addr of  npage with the linear addr start
+            ret = page_insert(to, npage, start, perm);
+            assert(ret == 0);
         }
         start += PGSIZE;
     } while (start != 0 && start < end);
@@ -545,7 +569,7 @@ page_remove(pde_t *pgdir, uintptr_t la) {
 //  la:    the linear address need to map
 //  perm:  the permission of this Page which is setted in related pte
 // return value: always 0
-//note: PT is changed, so the TLB need to be invalidate 
+//note: PT is changed, so the TLB need to be invalidate
 int
 page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     pte_t *ptep = get_pte(pgdir, la, 1);
@@ -576,7 +600,7 @@ tlb_invalidate(pde_t *pgdir, uintptr_t la) {
     }
 }
 
-// pgdir_alloc_page - call alloc_page & page_insert functions to 
+// pgdir_alloc_page - call alloc_page & page_insert functions to
 //                  - allocate a page size memory & setup an addr map
 //                  - pa<->la with linear address la and the PDT pgdir
 struct Page *
@@ -593,7 +617,7 @@ pgdir_alloc_page(pde_t *pgdir, uintptr_t la, uint32_t perm) {
                 page->pra_vaddr=la;
                 assert(page_ref(page) == 1);
                 //cprintf("get No. %d  page: pra_vaddr %x, pra_link.prev %x, pra_link_next %x in pgdir_alloc_page\n", (page-pages), page->pra_vaddr,page->pra_page_link.prev, page->pra_page_link.next);
-            } 
+            }
             else  {  //now current is existed, should fix it in the future
                 //swap_map_swappable(current->mm, la, page, 0);
                 //page->pra_vaddr=la;
@@ -716,7 +740,7 @@ perm2str(int perm) {
 //  table:       the beginning addr of table
 //  left_store:  the pointer of the high side of table's next range
 //  right_store: the pointer of the low side of table's next range
-// return value: 0 - not a invalid item range, perm - a valid item range with perm permission 
+// return value: 0 - not a invalid item range, perm - a valid item range with perm permission
 static int
 get_pgtable_items(size_t left, size_t right, size_t start, uintptr_t *table, size_t *left_store, size_t *right_store) {
     if (start >= right) {
