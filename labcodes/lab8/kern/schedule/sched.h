@@ -29,9 +29,9 @@ timer_init(timer_t *timer, struct proc_struct *proc, int expires) {
 
 struct run_queue;
 
-// The introduction of scheduling classes is borrrowed from Linux, and makes the 
-// core scheduler quite extensible. These classes (the scheduler modules) encapsulate 
-// the scheduling policies. 
+// The introduction of scheduling classes is borrrowed from Linux, and makes the
+// core scheduler quite extensible. These classes (the scheduler modules) encapsulate
+// the scheduling policies.
 struct sched_class {
     // the name of sched_class
     const char *name;
