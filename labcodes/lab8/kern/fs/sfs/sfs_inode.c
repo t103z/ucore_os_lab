@@ -546,7 +546,7 @@ sfs_close(struct inode *node) {
  * @sin:      sfs inode in memory
  * @buf:      the buffer Rd/Wr
  * @offset:   the offset of file
- * @alenp:    the length need to read (is a pointer). and will RETURN the really Rd/Wr lenght
+ * @alenp:    the length need to read (is a pointer). and will RETURN the real Rd/Wr length
  * @write:    BOOL, 0 read, 1 write
  */
 static int
@@ -589,7 +589,7 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
     uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
 
-  //LAB8:EXERCISE1 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
+  //LAB8:EXERCISE1 2014011561 HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
 	/*
 	 * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
@@ -599,6 +599,61 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
      * (3) If end position isn't aligned with the last block, Rd/Wr some content from begin to the (endpos % SFS_BLKSIZE) of the last block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
 	*/
+    /*
+     *          |-SFS_BLKSIZE--| |-----nblks * SFS_BLKSIZE ------|
+     *          xxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxx
+     *                           |blkoff|  size |                              |
+     *                           |      |                                      |
+     *                         blkno  offset                                endpos
+     */
+
+    blkoff = offset % SFS_BLKSIZE;        // offset of first block
+    if (blkoff != 0) {  // (1) offset isn't aligned with the first block
+        // R/W some content from offset to the end of the first block
+        // size of unaligned portion, offset to first block OR all
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
+        // read inode number
+        if (ret = (sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        // R/W disk <--> buffer(mem)
+        if (ret = (sfs_buf_op(sfs, buf, size, blkno, blkoff)) != 0) {
+            goto out;
+        }
+        if (nblks == 0) {   // nothing left, R/W complete
+            goto out;
+        }
+        alen += size;   // update real R/W size  (required for return)
+        // prepare for next block
+        blkno++;
+        nblks--;
+        buf += size;
+    }
+    // (2) R/W aligned blocks
+    size = SFS_BLKSIZE;
+    while (nblks) {
+        if (ret = (sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if (ret = (sfs_buf_op(sfs, buf, size, blkno, blkoff)) != 0) {
+            goto out;
+        }
+        alen += size;
+        blkno++;
+        nblks--;
+        buf += size;
+    }
+    // (3) R/W tailing unaligned portion
+    size = endpos % SFS_BLKSIZE;
+    if (size != 0) {
+        if (ret = (sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if (ret = (sfs_buf_op(sfs, buf, size, blkno, blkoff)) != 0) {
+            goto out;
+        }
+        alen += size;
+    }
 out:
     *alenp = alen;
     if (offset + alen > sin->din->size) {
