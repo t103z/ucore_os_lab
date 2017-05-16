@@ -613,17 +613,17 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
         // size of unaligned portion, offset to first block OR all
         size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
         // read inode number
-        if (ret = (sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
         }
         // R/W disk <--> buffer(mem)
-        if (ret = (sfs_buf_op(sfs, buf, size, blkno, blkoff)) != 0) {
-            goto out;
-        }
-        if (nblks == 0) {   // nothing left, R/W complete
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) {
             goto out;
         }
         alen += size;   // update real R/W size  (required for return)
+        if (nblks == 0) {   // nothing left, R/W complete
+            goto out;
+        }
         // prepare for next block
         blkno++;
         nblks--;
@@ -632,10 +632,10 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     // (2) R/W aligned blocks
     size = SFS_BLKSIZE;
     while (nblks) {
-        if (ret = (sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
         }
-        if (ret = (sfs_buf_op(sfs, buf, size, blkno, blkoff)) != 0) {
+        if ((ret = sfs_block_op(sfs, buf, ino, 1)) != 0) {
             goto out;
         }
         alen += size;
@@ -646,10 +646,10 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     // (3) R/W tailing unaligned portion
     size = endpos % SFS_BLKSIZE;
     if (size != 0) {
-        if (ret = (sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
         }
-        if (ret = (sfs_buf_op(sfs, buf, size, blkno, blkoff)) != 0) {
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) {
             goto out;
         }
         alen += size;

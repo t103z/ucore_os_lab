@@ -143,7 +143,8 @@ alloc_proc(void) {
         proc->lab6_run_pool.left = proc->lab6_run_pool.right = proc->lab6_run_pool.parent = NULL;
         proc->lab6_stride = 0;
         proc->lab6_priority = 0;
-    //LAB8:EXERCISE2 YOUR CODE HINT:need add some code to init fs in proc_struct, ...
+    //LAB8: 2014011561 HINT:need add some code to init fs in proc_struct, ...
+        proc->filesp = NULL;
     }
     return proc;
 }
@@ -449,7 +450,7 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     }
     ret = -E_NO_MEM;
     //LAB4:EXERCISE2 2014011561
-    //LAB8:EXERCISE2 YOUR CODE  HINT:how to copy the fs in parent's proc_struct?
+    //LAB8:EXERCISE2 2014011561  HINT:how to copy the fs in parent's proc_struct?
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
      * MACROs or Functions:
@@ -489,10 +490,16 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
         cprintf("Cannot allocate kernel stack\n");
         goto bad_fork_cleanup_proc;
     }
+
+    // LAB 8 set filesp
+    if ((copy_files(clone_flags, proc) != 0)) {
+        cprintf("Cannot copy files_struct\n");
+        goto bad_fork_cleanup_kstack;
+    }
     //    3. call copy_mm to dup OR share mm according clone_flag
     if (copy_mm(clone_flags, proc) != 0) {
         cprintf("Cannot copy mm structure\n");
-        goto bad_fork_cleanup_kstack;
+        goto bad_fork_cleanup_fs;   // update in LAB8
     }
     //    4. call copy_thread to setup tf & context in proc_struct
     copy_thread(proc, stack, tf);
@@ -596,10 +603,10 @@ load_icode_read(int fd, void *buf, size_t len, off_t offset) {
 }
 
 // load_icode -  called by sys_exec-->do_execve
-  
+
 static int
 load_icode(int fd, int argc, char **kargv) {
-    /* LAB8:EXERCISE2 YOUR CODE  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
+    /* LAB8: 2014011561   HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
      * MACROs or Functions:
      *  mm_create        - create a mm
      *  setup_pgdir      - setup pgdir in mm
@@ -623,6 +630,180 @@ load_icode(int fd, int argc, char **kargv) {
      * (7) setup trapframe for user environment
      * (8) if up steps failed, you should cleanup the env.
      */
+    assert(argc >= 0 && argc <= EXEC_MAX_ARG_NUM);
+    if (current->mm != NULL) {
+        panic("load_icode: current->mm must be empty.\n");
+    }
+
+    int ret = -E_NO_MEM;
+    struct mm_struct *mm;
+    // (1) create a new mm for current process
+    if ((mm = mm_create()) == NULL) {
+        goto bad_mm;
+    }
+    // (2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
+    if (setup_pgdir(mm) != 0) {
+        goto bad_pgdir_cleanup_mm;
+    }
+    // (3) copy TEXT/DATA/BSS parts in binary to memory space of process
+    struct Page *page;
+    // (3.1) read raw data content in file and resolve elfhdr
+    struct elfhdr elf_header;
+    // update in LAB8
+    if ((ret = load_icode_read(fd, &elf_header, sizeof(struct elfhdr), 0) != 0)) {
+        goto bad_elf_cleanup_pgdir;
+    }
+    // validate MAGIC filed
+    if (elf_header.e_magic != ELF_MAGIC) {
+        ret = -E_INVAL_ELF;
+        goto bad_elf_cleanup_pgdir;
+    }
+    // (3.2) read raw data content in file and resolve proghdr based on info in elfhdr
+    struct proghdr prog_header;
+    uint32_t vm_flags, perm;
+    int i;
+    for (i = 0; i < elf_header.e_phnum; i++) {
+        // update in LAB8
+        if ((load_icode_read(fd, &prog_header, sizeof(struct proghdr), sizeof(struct elfhdr) + i * sizeof(struct proghdr))) != 0) {
+            goto bad_cleanup_mmap;
+        }
+        // validate prochdr
+        if (prog_header.p_type != ELF_PT_LOAD) {
+            continue;
+        }
+        if (prog_header.p_filesz > prog_header.p_memsz) {
+            ret = -E_INVAL_ELF;
+            goto bad_cleanup_mmap;
+        }
+        if (prog_header.p_filesz == 0) {
+            continue;
+        }
+        // (3.3) call mm_map to build vma related to TEXT/DATA
+        vm_flags = 0, perm = PTE_U;
+        if (prog_header.p_flags & ELF_PF_X) vm_flags |= VM_EXEC;
+        if (prog_header.p_flags & ELF_PF_W) vm_flags |= VM_WRITE;
+        if (prog_header.p_flags & ELF_PF_R) vm_flags |= VM_READ;
+        if (vm_flags & VM_WRITE) perm |= PTE_W;
+        if ((ret = mm_map(mm, prog_header.p_va, prog_header.p_memsz, vm_flags, NULL)) != 0) {
+            goto bad_cleanup_mmap;
+        }
+        off_t offset =  prog_header.p_offset;
+        size_t off, size;
+
+        // (3.4) callpgdir_alloc_page to allocate page for TEXT/DATA, read contents in file
+        // and copy them into the new allocated pages
+        uintptr_t start = prog_header.p_va, end, la = ROUNDDOWN(start, PGSIZE);
+
+        ret = -E_NO_MEM;
+
+        end = prog_header.p_va + prog_header.p_filesz;
+        while (start < end) {
+            if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
+                ret = -E_NO_MEM;
+                goto bad_cleanup_mmap;
+            }
+            off = start - la, size = PGSIZE - off, la += PGSIZE;
+            if (end < la) {
+                size -= la - end;
+            }
+            // update in LAB8
+            if ((ret = load_icode_read(fd, page2kva(page) + off, size, offset)) != 0) {
+                goto bad_cleanup_mmap;
+            }
+            start += size, offset += size;
+        }
+        // (3.5) callpgdir_alloc_page to allocate pages for BSS, memset zero in these pages
+        end = prog_header.p_va + prog_header.p_memsz;
+        if (start < la) {
+            /* prog_header.p_memsz == prog_header.p_filesz */
+            if (start == end) {
+                continue ;
+            }
+            off = start + PGSIZE - la, size = PGSIZE - off;
+            if (end < la) {
+                size -= la - end;
+            }
+            memset(page2kva(page) + off, 0, size);
+            start += size;
+            assert((end < la && start == end) || (end >= la && start == la));
+        }
+        while (start < end) {
+            if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
+                ret = -E_NO_MEM;
+                goto bad_cleanup_mmap;
+            }
+            off = start - la, size = PGSIZE - off, la += PGSIZE;
+            if (end < la) {
+                size -= la - end;
+            }
+            memset(page2kva(page) + off, 0, size);
+            start += size;
+        }
+    }
+    // update in LAB8
+    sysfile_close(fd);
+    //(4) build user stack memory
+    vm_flags = VM_READ | VM_WRITE | VM_STACK;
+    if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
+        goto bad_cleanup_mmap;
+    }
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-PGSIZE , PTE_USER) != NULL);
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-2*PGSIZE , PTE_USER) != NULL);
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-3*PGSIZE , PTE_USER) != NULL);
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
+
+    //(5) set current process's mm, sr3, and set CR3 reg = physical addr of Page Directory
+    mm_count_inc(mm);
+    current->mm = mm;
+    current->cr3 = PADDR(mm->pgdir);
+    lcr3(PADDR(mm->pgdir));
+
+    // (6) setup uargc and uargv in user stacks (new in LAB8)
+    uint32_t argv_size = 0;
+    for (i = 0; i < argc; i++) {
+        argv_size += strnlen(kargv[i],EXEC_MAX_ARG_LEN + 1)+1;
+    }
+
+    uintptr_t stacktop = USTACKTOP - (argv_size/sizeof(long)+1)*sizeof(long);
+    char** uargv = (char **)(stacktop  - argc * sizeof(char *));
+
+    argv_size = 0;
+    for (i = 0; i < argc; i++) {
+        uargv[i] = strcpy((char *)(stacktop + argv_size ), kargv[i]);
+        argv_size +=  strnlen(kargv[i],EXEC_MAX_ARG_LEN + 1)+1;
+    }
+
+    stacktop = (uintptr_t)uargv - sizeof(int);
+    *(int *)stacktop = argc;
+
+    //(7) setup trapframe for user environment
+    struct trapframe *tf = current->tf;
+    memset(tf, 0, sizeof(struct trapframe));
+    /* LAB5:EXERCISE1 2014011561
+     * should set tf_cs,tf_ds,tf_es,tf_ss,tf_esp,tf_eip,tf_eflags
+     * NOTICE: If we set trapframe correctly, then the user level process can return to USER MODE from kernel. So
+     *          tf_cs should be USER_CS segment (see memlayout.h)
+     *          tf_ds=tf_es=tf_ss should be USER_DS segment
+     *          tf_esp should be the top addr of user stack (USTACKTOP)
+     *          tf_eip should be the entry point of this binary program (elf->e_entry)
+     *          tf_eflags should be set to enable computer to produce Interrupt
+     */
+    tf->tf_cs = USER_CS;
+    tf->tf_ds = tf->tf_es = tf->tf_ss = USER_DS;
+    tf->tf_esp = stacktop;
+    tf->tf_eip = elf_header.e_entry;
+    tf->tf_eflags = FL_IF;         // EFLAGS_REGISTER defined in mmu.h, enable Interrupt
+    ret = 0;
+out:
+    return ret;
+bad_cleanup_mmap:
+    exit_mmap(mm);
+bad_elf_cleanup_pgdir:
+    put_pgdir(mm);
+bad_pgdir_cleanup_mm:
+    mm_destroy(mm);
+bad_mm:
+    goto out;
 }
 
 // this function isn't very correct in LAB8
@@ -671,12 +852,12 @@ do_execve(const char *name, int argc, const char **argv) {
 
     char local_name[PROC_NAME_LEN + 1];
     memset(local_name, 0, sizeof(local_name));
-    
+
     char *kargv[EXEC_MAX_ARG_NUM];
     const char *path;
-    
+
     int ret = -E_INVAL;
-    
+
     lock_mm(mm);
     if (name == NULL) {
         snprintf(local_name, sizeof(local_name), "<null> %d", current->pid);
@@ -695,7 +876,7 @@ do_execve(const char *name, int argc, const char **argv) {
     unlock_mm(mm);
     files_closeall(current->filesp);
 
-    /* sysfile_open will check the first argument path, thus we have to use a user-space pointer, and argv[0] may be incorrect */    
+    /* sysfile_open will check the first argument path, thus we have to use a user-space pointer, and argv[0] may be incorrect */
     int fd;
     if ((ret = fd = sysfile_open(path, O_RDONLY)) < 0) {
         goto execve_exit;
@@ -862,7 +1043,7 @@ init_main(void *arg) {
     if ((ret = vfs_set_bootfs("disk0:")) != 0) {
         panic("set boot fs failed: %e.\n", ret);
     }
-    
+
     size_t nr_free_pages_store = nr_free_pages();
     size_t kernel_allocated_store = kallocated();
 
@@ -878,7 +1059,7 @@ init_main(void *arg) {
     }
 
     fs_cleanup();
-        
+
     cprintf("all user-mode processes have quit.\n");
     assert(initproc->cptr == NULL && initproc->yptr == NULL && initproc->optr == NULL);
     assert(nr_process == 2);
@@ -889,7 +1070,7 @@ init_main(void *arg) {
     return 0;
 }
 
-// proc_init - set up the first kernel thread idleproc "idle" by itself and 
+// proc_init - set up the first kernel thread idleproc "idle" by itself and
 //           - create the second kernel thread init_main
 void
 proc_init(void) {
@@ -908,12 +1089,12 @@ proc_init(void) {
     idleproc->state = PROC_RUNNABLE;
     idleproc->kstack = (uintptr_t)bootstack;
     idleproc->need_resched = 1;
-    
+
     if ((idleproc->filesp = files_create()) == NULL) {
         panic("create filesp (idleproc) failed.\n");
     }
     files_count_inc(idleproc->filesp);
-    
+
     set_proc_name(idleproc, "idle");
     nr_process ++;
 
